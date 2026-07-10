@@ -160,7 +160,7 @@ docker compose -f docker-compose.yml -f docker-compose.cpu.yml down -v
 - **Startup order:** vLLM → (healthy) → Nginx + Prometheus → Grafana
 - **Model cache:** `huggingface_cache` Docker volume persists across `docker compose down`
 - **Health check:** Python probe on `GET /health` (no curl dependency)
-- **Metrics scrape:** Prometheus polls `vllm:8000/metrics` every 5 seconds
+- **Metrics scrape:** Prometheus polls `vllm:8000/metrics` every 15 seconds
 
 ## License
 

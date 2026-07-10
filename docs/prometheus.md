@@ -6,7 +6,7 @@ Prometheus polls vLLM's built-in `/metrics` endpoint and stores time-series data
 
 | Responsibility | Detail |
 |----------------|--------|
-| Scrape | Poll `vllm:8000/metrics` every 5 seconds |
+| Scrape | Poll `vllm:8000/metrics` every 15 seconds |
 | Store | Persist metrics in the `prometheus_data` Docker volume |
 | Serve | Expose query API at http://localhost:9090 |
 
@@ -19,7 +19,7 @@ At startup, the Prometheus container renders the template with your `VLLM_SERVED
 ```yaml
 scrape_configs:
   - job_name: vllm
-    scrape_interval: 5s
+    scrape_interval: 15s
     scrape_timeout: 10s
     metrics_path: /metrics
     static_configs:
@@ -34,7 +34,7 @@ scrape_configs:
 |---------|-------|-------|
 | Target | `vllm:8000` | Docker service name, **not** `localhost` |
 | Path | `/metrics` | Enabled by default in vLLM OpenAI server |
-| Timeout | `10s` | Increased from 4s to avoid false DOWN during load |
+| Timeout | `10s` | Must be ≤ scrape interval (`15s`) |
 | Auth | None | Direct internal network access |
 
 ## Network topology

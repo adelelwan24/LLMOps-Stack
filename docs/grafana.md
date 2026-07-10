@@ -76,7 +76,7 @@ Grafana never talks to vLLM directly. All metrics flow through Prometheus.
 Grafana panels may be empty even when everything is healthy:
 
 1. **No inference traffic yet** — histogram and counter metrics only populate after requests
-2. **Prometheus target just came UP** — wait one scrape interval (5s)
+2. **Prometheus target just came UP** — wait one scrape interval (15s)
 3. **Time range too narrow** — dashboard defaults to "Last 15 minutes"
 
 ### Generate data
