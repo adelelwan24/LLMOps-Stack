@@ -183,12 +183,12 @@
       },
       "targets": [
         {
-          "expr": "vllm:gpu_cache_usage_perc",
-          "legendFormat": "GPU cache",
+          "expr": "vllm:kv_cache_usage_perc",
+          "legendFormat": "KV cache",
           "refId": "A"
         }
       ],
-      "title": "GPU KV Cache Usage",
+      "title": "KV Cache Usage",
       "type": "stat"
     }
   ],
@@ -199,7 +199,7 @@
   "time": { "from": "now-15m", "to": "now" },
   "timepicker": {},
   "timezone": "browser",
-  "title": "vLLM Inference — Qwen 4B",
-  "uid": "vllm-qwen4b",
+  "title": "vLLM Inference",
+  "uid": "vllm-inference",
   "version": 1
 }

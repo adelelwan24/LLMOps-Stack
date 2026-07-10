@@ -1,28 +1,28 @@
 services:
   vllm:
-    image: vllm/vllm-openai:latest
     container_name: vllm-inference
-    ipc: host
-    shm_size: "2gb"
     environment:
-      HF_TOKEN: ${HF_TOKEN}
-      HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN}
+      HF_TOKEN: ${HF_TOKEN:-}
+      HUGGING_FACE_HUB_TOKEN: ${HF_TOKEN:-}
     volumes:
       - huggingface_cache:/root/.cache/huggingface
-    command: >
-      --model ${VLLM_MODEL:-Qwen/Qwen3-4B-Instruct-2507}
-      --host 0.0.0.0
-      --port 8000
-      --gpu-memory-utilization 0.9
-      --max-model-len 4096
-      --served-model-name qwen-4b-instruct
-    gpus: all
+    command:
+      - --model
+      - ${VLLM_MODEL:-Qwen/Qwen2.5-0.5B}
+      - --served-model-name
+      - ${VLLM_SERVED_MODEL_NAME:-qwen-0.5b}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      test:
+        - CMD-SHELL
+        - python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"
       interval: 30s
-      timeout: 50s
+      timeout: 10s
       start_period: 300s
-      retries: 5
+      retries: 10
     networks:
       - llmops
     restart: unless-stopped
@@ -31,7 +31,7 @@ services:
     image: nginx:1.27-alpine
     container_name: nginx-proxy
     ports:
-      - "8000:80"
+      - "${VLLM_PORT:-8000}:80"
     volumes:
       - ./config/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
@@ -46,13 +46,21 @@ services:
     container_name: prometheus
     ports:
       - "9090:9090"
+    environment:
+      VLLM_SERVED_MODEL_NAME: ${VLLM_SERVED_MODEL_NAME:-qwen-0.5b}
     volumes:
-      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./config/prometheus.yml.template:/etc/prometheus/prometheus.yml.template:ro
       - prometheus_data:/prometheus
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.path=/prometheus"
-      - "--web.enable-lifecycle"
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        sed "s|__VLLM_SERVED_MODEL_NAME__|$${VLLM_SERVED_MODEL_NAME:-qwen-0.5b}|g" \
+          /etc/prometheus/prometheus.yml.template > /tmp/prometheus.yml
+        exec /bin/prometheus \
+          --config.file=/tmp/prometheus.yml \
+          --storage.tsdb.path=/prometheus \
+          --web.enable-lifecycle
     depends_on:
       vllm:
         condition: service_healthy

@@ -1,17 +1,15 @@
 # LLMOps Stack
 
-Production-ready GPU LLMOps stack for serving open-weight LLMs with Docker Compose. Deploys **vLLM** inference behind an authenticated **Nginx** proxy, with **Prometheus/Grafana** metrics and **MLflow** experiment tracking.
+Production-ready LLM inference and monitoring stack with Docker Compose. Deploys **vLLM** behind an authenticated **Nginx** proxy, with **Prometheus/Grafana** metrics and **MLflow** experiment tracking.
 
-Optimized for a single **NVIDIA GPU** (e.g. RTX 3090).
+Runs on **CPU**, **NVIDIA GPU**, or **AMD ROCm** via compose override files. Default model: [Qwen/Qwen2.5-0.5B](https://huggingface.co/Qwen/Qwen2.5-0.5B) (cached across restarts).
 
 ## Overview
 
-This project packages a complete inference pipeline:
-
-- **Inference** — vLLM serves [Qwen3-4B-Instruct](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507) via an OpenAI-compatible API
-- **Security** — Nginx reverse proxy enforces Bearer token authentication; vLLM is not exposed on the host
-- **Monitoring** — Prometheus scrapes vLLM metrics; Grafana ships with a pre-built inference dashboard
-- **Observability** — MLflow logs prompts, responses, and latency for quality tracking
+- **Inference** — vLLM serves any Hugging Face model via an OpenAI-compatible API
+- **Security** — Nginx enforces Bearer token auth; vLLM is not exposed on the host
+- **Monitoring** — Prometheus scrapes vLLM `/metrics`; Grafana ships with a pre-built dashboard
+- **Observability** — MLflow logs prompts, responses, and latency
 - **Client** — LangChain test script validates the full stack end to end
 
 ```mermaid
@@ -23,66 +21,26 @@ flowchart LR
     Client -->|experiments| MLflow["MLflow :5000"]
 ```
 
+**Service documentation:** [docs/](docs/README.md) (Nginx, Prometheus, Grafana, deployment)
+
 ## Project layout
 
 ```
-LLM_Deployment_Stack/
-├── docker-compose.yml          # Main orchestrator (GPU)
-├── .env.example                # Environment variable template
+LLMOps-Stack/
+├── docker-compose.yml          # Base stack (shared services)
+├── docker-compose.gpu.yml      # NVIDIA GPU overrides
+├── docker-compose.cpu.yml      # CPU overrides
+├── docker-compose.rocm.yml     # AMD ROCm overrides
+├── .env.example                # Environment template
 ├── config/
-│   ├── nginx.conf              # Reverse proxy + Bearer auth
-│   ├── prometheus.yml          # vLLM metrics scrape config
+│   ├── nginx.conf
+│   ├── prometheus.yml.template
 │   └── grafana/
-│       ├── dashboards/
-│       │   └── vllm-inference.json
-│       └── provisioning/       # Auto-configured datasource + dashboards
 ├── client/
-│   ├── pyproject.toml          # Python dependencies (uv)
-│   ├── uv.lock                 # Locked dependency versions
-│   └── test_stack.py           # LangChain + MLflow integration test
+│   └── test_stack.py
+├── docs/                       # Service guides
 └── scripts/
-    └── set-repo-token.sh       # Repo-scoped GitHub PAT setup (optional)
-```
-
-## Stack
-
-| Service | Image | Host port | Role |
-|---------|-------|-----------|------|
-| **vLLM** | `vllm/vllm-openai:latest` | — (internal) | GPU inference engine |
-| **Nginx** | `nginx:1.27-alpine` | `8000` | Auth proxy → vLLM |
-| **Prometheus** | `prom/prometheus:v2.54.1` | `9090` | Metrics collection |
-| **Grafana** | `grafana/grafana:11.2.0` | `3000` | Dashboards & visualization |
-| **MLflow** | `ghcr.io/mlflow/mlflow:v2.17.0` | `5000` | Experiment tracking |
-
-### vLLM configuration
-
-| Setting | Value |
-|---------|-------|
-| Model | `Qwen/Qwen3-4B-Instruct-2507` |
-| Served name | `qwen-4b-instruct` |
-| Context window | 4096 tokens |
-| GPU memory | 90% utilization |
-| API | OpenAI-compatible (`/v1/chat/completions`) |
-
-### Grafana dashboard metrics
-
-- Time to First Token (TTFT) — p50 / p95 / p99
-- End-to-end request latency
-- Token throughput (generated vs prompt)
-- GPU KV cache usage
-
-## Prerequisites
-
-- **Docker** and **Docker Compose** v2+
-- **NVIDIA GPU** with drivers installed
-- **[NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)** (`nvidia-docker`)
-- **Hugging Face token** — required if the model is gated (`HF_TOKEN`)
-- **uv** — for the Python client ([install guide](https://docs.astral.sh/uv/getting-started/installation/))
-
-Verify GPU access:
-
-```bash
-docker run --rm --gpus all nvidia/cuda:12.0.0-base-ubuntu22.04 nvidia-smi
+    └── verify-stack.sh
 ```
 
 ## Quick start
@@ -93,49 +51,54 @@ docker run --rm --gpus all nvidia/cuda:12.0.0-base-ubuntu22.04 nvidia-smi
 cp .env.example .env
 ```
 
-Edit `.env` and set your Hugging Face token:
-
-```bash
-HF_TOKEN=hf_your_token_here
-```
-
 ### 2. Start the stack
 
-```bash
-docker compose up -d
-```
-
-vLLM needs time to download and load the model. The health check allows up to **5 minutes** (`start_period: 300s`). Nginx, Prometheus, and Grafana start only after vLLM is healthy.
-
-Watch startup progress:
+Pick your runtime:
 
 ```bash
-docker compose logs -f vllm
+# CPU (no GPU)
+docker compose -f docker-compose.yml -f docker-compose.cpu.yml up -d
+
+# NVIDIA GPU
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+
+# AMD ROCm (Linux)
+docker compose -f docker-compose.yml -f docker-compose.rocm.yml up -d
 ```
 
-### 3. Verify inference (curl)
+vLLM downloads the model on first run into the `huggingface_cache` volume. Subsequent starts reuse cached weights. Allow up to **5 minutes** for the health check.
 
-All API requests must include the Bearer token:
+```bash
+docker compose -f docker-compose.yml -f docker-compose.cpu.yml logs -f vllm
+```
+
+### 3. Verify metrics connectivity
+
+```bash
+VLLM_RUNTIME=cpu ./scripts/verify-stack.sh
+```
+
+Open http://localhost:9090/targets — the `vllm` job should be **UP**.
+
+### 4. Test inference
 
 ```bash
 curl http://localhost:8000/v1/models \
   -H "Authorization: Bearer ML expert rules"
 ```
 
-Send a chat completion:
-
 ```bash
 curl http://localhost:8000/v1/chat/completions \
   -H "Authorization: Bearer ML expert rules" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "qwen-4b-instruct",
+    "model": "qwen-0.5b",
     "messages": [{"role": "user", "content": "Hello!"}],
     "max_tokens": 128
   }'
 ```
 
-### 4. Run the test client
+### 5. Run the test client
 
 ```bash
 cd client
@@ -143,12 +106,10 @@ uv sync
 uv run python test_stack.py
 ```
 
-The client routes requests through Nginx, uses the Bearer token as the API key, and logs each prompt/response pair to MLflow.
-
 ## Service URLs
 
-| UI | URL | Default credentials |
-|----|-----|---------------------|
+| UI | URL | Credentials |
+|----|-----|-------------|
 | Inference API | http://localhost:8000/v1 | Bearer `ML expert rules` |
 | Grafana | http://localhost:3000 | `admin` / `admin` |
 | Prometheus | http://localhost:9090 | — |
@@ -158,71 +119,49 @@ The client routes requests through Nginx, uses the Bearer token as the API key, 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `HF_TOKEN` | — | Hugging Face token for model download |
-| `VLLM_MODEL` | `Qwen/Qwen3-4B-Instruct-2507` | Hugging Face model ID |
-| `MLFLOW_TRACKING_URI` | `http://localhost:5000` | MLflow server URL |
+| `VLLM_MODEL` | `Qwen/Qwen2.5-0.5B` | Hugging Face model ID |
+| `VLLM_SERVED_MODEL_NAME` | `qwen-0.5b` | OpenAI API model name |
+| `HF_TOKEN` | — | Hugging Face token (gated models) |
+| `VLLM_PORT` | `8000` | Nginx host port |
 
-Client-side (optional, in `.env` at project root):
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `NGINX_BASE_URL` | `http://localhost:8000/v1` | OpenAI-compatible endpoint |
-| `BEARER_TOKEN` | `ML expert rules` | Nginx auth token |
-| `VLLM_MODEL_NAME` | `qwen-4b-instruct` | Model name sent to the API |
+See [.env.example](.env.example) for CPU/GPU/ROCm-specific options.
 
 ## Security
 
-- vLLM is **not** published on the host — only Nginx is reachable on port `8000`
+- vLLM is **not** published on the host — only Nginx is reachable on port 8000
 - Requests without `Authorization: Bearer ML expert rules` receive `401 Unauthorized`
 - Prometheus scrapes vLLM **directly** on the internal Docker network (bypasses Nginx auth)
-- Change the default Grafana password after first login
-- Never commit `.env` or tokens to version control
+- Do **not** test metrics at `localhost:8000/metrics` — that hits Nginx and returns 401
 
 ## Operations
 
-**Stop the stack:**
-
 ```bash
-docker compose down
-```
+# Stop (keeps model cache and metrics)
+docker compose -f docker-compose.yml -f docker-compose.cpu.yml down
 
-**Stop and remove volumes** (clears model cache, metrics, MLflow data):
-
-```bash
-docker compose down -v
-```
-
-**View logs for a service:**
-
-```bash
-docker compose logs -f vllm
-docker compose logs -f nginx
-```
-
-**Restart a single service:**
-
-```bash
-docker compose restart vllm
+# Stop and remove all volumes (clears model cache)
+docker compose -f docker-compose.yml -f docker-compose.cpu.yml down -v
 ```
 
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
-| vLLM stuck in `starting` | Model download in progress | Wait up to 5 min; check `docker compose logs vllm` |
-| `401 Unauthorized` on API | Missing/wrong Bearer token | Use `Authorization: Bearer ML expert rules` |
-| CUDA / GPU errors | NVIDIA toolkit not installed | Install [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) |
-| OOM on GPU | VRAM exhausted | Lower `--gpu-memory-utilization` or use a smaller model |
-| Grafana shows no data | vLLM not yet serving traffic | Send a few requests, then refresh the dashboard |
-| Client `Connection refused` | Stack not running | Run `docker compose up -d` and wait for vLLM health check |
+| vLLM stuck in `starting` | Model download in progress | Wait up to 5 min; check logs |
+| Prometheus not running | vLLM unhealthy | Check `docker compose ps vllm`; see [docs/prometheus.md](docs/prometheus.md) |
+| Prometheus target DOWN | vLLM not ready or wrong network | Run `./scripts/verify-stack.sh` |
+| `401` at `localhost:8000/metrics` | Hitting Nginx, not vLLM | Use http://localhost:9090/targets instead |
+| `401` on API | Missing Bearer token | Add `Authorization: Bearer ML expert rules` |
+| Grafana shows no data | No inference traffic yet | Send requests, then refresh dashboard |
+| CUDA / GPU errors | NVIDIA toolkit missing | Install [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) |
 
 ## Architecture notes
 
 - **Startup order:** vLLM → (healthy) → Nginx + Prometheus → Grafana
-- **Model cache:** persisted in the `huggingface_cache` Docker volume across restarts
-- **Health check:** vLLM `GET /health` every 30s, 50s timeout, 300s start period
-- **Metrics scrape:** Prometheus polls vLLM `/metrics` every 5 seconds
+- **Model cache:** `huggingface_cache` Docker volume persists across `docker compose down`
+- **Health check:** Python probe on `GET /health` (no curl dependency)
+- **Metrics scrape:** Prometheus polls `vllm:8000/metrics` every 5 seconds
 
 ## License
 
-Model weights are subject to the [Qwen license](https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507). Infrastructure configs in this repository are provided as-is for deployment reference.
+Model weights are subject to their respective Hugging Face licenses. Infrastructure configs in this repository are provided as-is for deployment reference.

@@ -21,7 +21,7 @@ load_dotenv()
 NGINX_BASE_URL = os.getenv("NGINX_BASE_URL", "http://localhost:8000/v1")
 BEARER_TOKEN = os.getenv("BEARER_TOKEN", "ML expert rules")
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
-MODEL_NAME = os.getenv("MODEL_HF_NAME") or os.getenv("VLLM_MODEL_NAME", "qwen-4b-instruct")
+MODEL_NAME = os.getenv("VLLM_MODEL_NAME") or os.getenv("VLLM_SERVED_MODEL_NAME", "qwen-0.5b")
 EXPERIMENT_NAME = "llm-inference-quality"
 
 

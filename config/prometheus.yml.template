@@ -12,4 +12,4 @@ scrape_configs:
           - vllm:8000
         labels:
           service: vllm-inference
-          model: qwen-0.5b
+          model: __VLLM_SERVED_MODEL_NAME__
