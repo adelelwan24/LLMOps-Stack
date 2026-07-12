@@ -17,6 +17,103 @@ Default model: **Qwen/Qwen2.5-0.5B** — downloaded on first start into the `hug
 | NVIDIA GPU | `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d` | NVIDIA GPU + Container Toolkit |
 | AMD ROCm | `docker compose -f docker-compose.yml -f docker-compose.rocm.yml up -d` | AMD GPU + amdgpu driver |
 
+## How Compose override files work
+
+The deploy command uses two `-f` files. Compose merges them left → right; later files override earlier ones for the same service.
+
+| Part | Meaning |
+|------|---------|
+| `docker compose` | Docker Compose v2 CLI |
+| `-f docker-compose.yml` | Base stack: shared services (vLLM shell, Nginx, Prometheus, Grafana, MLflow, network, volumes) |
+| `-f docker-compose.cpu.yml` (or `.gpu.yml` / `.rocm.yml`) | Runtime override: image, devices, CPU/GPU/ROCm-specific vLLM flags |
+| `up` | Create and start services |
+| `-d` | Detached (run in the background) |
+
+Example: with the CPU override, you get the full shared stack from the base file, with the `vllm` service swapped to the CPU image and resource limits.
+
+### Inspect the merged Compose file
+
+To see the fully resolved definition after overrides and env substitution:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.cpu.yml config
+```
+
+Useful variants:
+
+```bash
+# Save to a file
+docker compose -f docker-compose.yml -f docker-compose.cpu.yml config > merged.yml
+
+# Validate only (no output if OK)
+docker compose -f docker-compose.yml -f docker-compose.cpu.yml config --quiet
+```
+
+## Localhost vs the internal Docker network
+
+`localhost` and the Compose network (`llmops`) are different places. The same hostname means different things depending on **where** the request runs.
+
+### `localhost` / `127.0.0.1`
+
+Means “this machine / this container only.” It never jumps to another container by itself.
+
+| Where you run the request | What `localhost:8000` is |
+|---------------------------|--------------------------|
+| On your **host** (browser, PowerShell, curl) | Nginx (published as host port 8000) |
+| **Inside** the vLLM container | vLLM itself (used by the healthcheck) |
+| **Inside** the Prometheus container | Prometheus’s own loopback — **not** vLLM |
+
+### Internal Docker network (`llmops`)
+
+Compose creates a private virtual network named `llmops`. Containers on it resolve each other by **service name** (Docker DNS):
+
+| Hostname | Resolves to |
+|----------|-------------|
+| `vllm` | vLLM container |
+| `nginx` | Nginx container |
+| `prometheus` | Prometheus container |
+| `grafana` | Grafana container |
+| `mlflow` | MLflow container |
+
+Example: from Prometheus, `http://vllm:8000/metrics` reaches vLLM on that shared network — no host ports, no Nginx.
+
+### How this stack uses both
+
+```text
+HOST (your PC)
+  localhost:8000  →  Nginx (published port)
+  localhost:9090  →  Prometheus UI
+  localhost:3000  →  Grafana
+  localhost:5000  →  MLflow
+
+DOCKER NETWORK "llmops"
+  nginx  ──proxy──►  vllm:8000
+  prometheus ──────►  vllm:8000/metrics   (no auth)
+  grafana ─────────►  prometheus:9090
+
+INSIDE vllm CONTAINER
+  127.0.0.1:8000/health  →  vLLM only (healthcheck)
+```
+
+**Rule of thumb:** use `localhost` from the host for published UIs and the API; use service names (`vllm`, `prometheus`) for container-to-container traffic on the internal network.
+
+## Hugging Face token (`HF_TOKEN`)
+
+You only set **one** value in `.env`:
+
+```bash
+HF_TOKEN=hf_your_token_here
+```
+
+Inside the vLLM container, Compose maps that same value to two environment variables:
+
+| Env var in container | Why |
+|----------------------|-----|
+| `HF_TOKEN` | Common shorthand used by many HF / vLLM examples |
+| `HUGGING_FACE_HUB_TOKEN` | Official Hugging Face Hub library name |
+
+They are the same token, not two different secrets. Setting both avoids "token not found" if one code path only checks one name. Optional for public models like `Qwen/Qwen2.5-0.5B`; required for gated models.
+
 ## CPU deployment
 
 ### Requirements
@@ -179,6 +276,18 @@ MLflow starts independently
 ```
 
 vLLM health check allows up to **5 minutes** (`start_period: 300s`) for first-time model download.
+
+### Why the healthcheck does not need Nginx auth
+
+The healthcheck runs **inside** the vLLM container and calls `http://127.0.0.1:8000/health`. That hits vLLM on localhost in the same container — it never goes through Nginx.
+
+```text
+Host → Nginx (:8000) → vLLM     ← public API; Bearer token required
+Docker healthcheck → 127.0.0.1:8000/health  ← no Nginx, no auth
+Prometheus → vllm:8000/metrics  ← internal Docker network; no Nginx, no auth
+```
+
+Auth only applies to traffic that enters via the Nginx proxy on the host. See [nginx.md](nginx.md) for the full auth boundary. For host `localhost` vs the `llmops` network, see [Localhost vs the internal Docker network](#localhost-vs-the-internal-docker-network).
 
 ## Further reading
 

@@ -17,3 +17,4 @@ services:
       - ${VLLM_GPU_MEMORY_UTILIZATION:-0.9}
       - --max-model-len
       - ${VLLM_MAX_MODEL_LEN:-4096}
+      - --enable-prefix-caching

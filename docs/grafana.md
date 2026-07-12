@@ -60,6 +60,20 @@ Pre-built dashboard: [`config/grafana/dashboards/vllm-inference.json`](../config
 
 Dashboard auto-refreshes every **5 seconds**.
 
+### Utilizing the KV cache from a client
+
+The KV cache lives inside vLLM — clients do not call it directly. To **reuse** it across requests:
+
+1. Server: `--enable-prefix-caching` (enabled in this stack’s Compose files)
+2. Client: send a long **identical** prompt prefix (system prompt / document) on every request
+3. Observe: later requests should show lower TTFT; Grafana’s KV Cache Usage panel rises
+
+```bash
+cd client
+uv sync
+uv run python kv_cache_demo.py
+```
+
 ## Data flow
 
 ```mermaid

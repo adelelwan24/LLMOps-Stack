@@ -124,13 +124,14 @@ uv run python test_stack.py
 | `HF_TOKEN` | — | Hugging Face token (gated models) |
 | `VLLM_PORT` | `8000` | Nginx host port |
 
-See [.env.example](.env.example) for CPU/GPU/ROCm-specific options.
+See [.env.example](.env.example) for CPU/GPU/ROCm-specific options. You only set `HF_TOKEN` once; Compose also injects it as `HUGGING_FACE_HUB_TOKEN` inside the container (same value, two names for library compatibility). Details: [docs/deployment.md](docs/deployment.md).
 
 ## Security
 
 - vLLM is **not** published on the host — only Nginx is reachable on port 8000
 - Requests without `Authorization: Bearer ML expert rules` receive `401 Unauthorized`
 - Prometheus scrapes vLLM **directly** on the internal Docker network (bypasses Nginx auth)
+- The vLLM healthcheck hits `127.0.0.1:8000/health` **inside** the container (also bypasses Nginx)
 - Do **not** test metrics at `localhost:8000/metrics` — that hits Nginx and returns 401
 
 ## Operations
@@ -141,6 +142,9 @@ docker compose -f docker-compose.yml -f docker-compose.cpu.yml down
 
 # Stop and remove all volumes (clears model cache)
 docker compose -f docker-compose.yml -f docker-compose.cpu.yml down -v
+
+# Inspect the merged Compose definition (base + override + env)
+docker compose -f docker-compose.yml -f docker-compose.cpu.yml config
 ```
 
 ## Troubleshooting
@@ -157,10 +161,12 @@ docker compose -f docker-compose.yml -f docker-compose.cpu.yml down -v
 
 ## Architecture notes
 
+- **Compose merge:** `-f docker-compose.yml -f docker-compose.<runtime>.yml` merges base + runtime override (later file wins). See [docs/deployment.md](docs/deployment.md).
+- **Networking:** Host `localhost` ≠ Docker service names. Use `localhost` for published ports; use `vllm` / `prometheus` on the internal `llmops` network. Details: [docs/deployment.md](docs/deployment.md#localhost-vs-the-internal-docker-network).
 - **Startup order:** vLLM → (healthy) → Nginx + Prometheus → Grafana
 - **Model cache:** `huggingface_cache` Docker volume persists across `docker compose down`
-- **Health check:** Python probe on `GET /health` (no curl dependency)
-- **Metrics scrape:** Prometheus polls `vllm:8000/metrics` every 15 seconds
+- **Health check:** Python probe on `GET /health` inside the vLLM container (`127.0.0.1`) — no Nginx, no curl dependency
+- **Metrics scrape:** Prometheus polls `vllm:8000/metrics` every 15 seconds on the internal network
 
 ## License
 

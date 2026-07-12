@@ -56,6 +56,19 @@ flowchart LR
 
 vLLM has **no published host port**. You cannot scrape `localhost:8000/metrics` — that address maps to Nginx, which returns 401.
 
+### Auth boundary (same idea as the healthcheck)
+
+| Traffic | Goes through Nginx? | Auth needed? |
+|---------|---------------------|--------------|
+| Host → `localhost:8000/v1/...` | Yes | Bearer token |
+| Host → `localhost:8000/metrics` | Yes | Bearer token (you get 401) |
+| Prometheus → `vllm:8000/metrics` | No | No |
+| Healthcheck → `127.0.0.1:8000/health` | No | No |
+
+Auth only gates the public Nginx entrypoint. Internal Docker-network and in-container probes talk to vLLM directly. See [nginx.md](nginx.md).
+
+For a fuller comparison of host `localhost` vs the `llmops` network, see [Localhost vs the internal Docker network](deployment.md#localhost-vs-the-internal-docker-network).
+
 ## Startup dependency
 
 Prometheus waits for vLLM to pass its health check before starting:

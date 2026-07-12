@@ -20,6 +20,7 @@ services:
       - 0.0.0.0
       - --port
       - "8000"
+      - --enable-prefix-caching
     shm_size: ${VLLM_SHM_SIZE:-4g}
     cap_add:
       - SYS_NICE

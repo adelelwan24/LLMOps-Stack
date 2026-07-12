@@ -74,7 +74,25 @@ vLLM streams tokens over long-lived HTTP connections. Nginx is configured for th
 | `proxy_read_timeout` | `300s` | Long generations won't time out |
 | `chunked_transfer_encoding` | `on` | Required for streaming bodies |
 
-## Why metrics do NOT go through Nginx
+## What bypasses Nginx auth (and why)
+
+Nginx auth applies only to traffic that enters through the host proxy (`localhost:8000`). Several paths talk to vLLM **without** going through Nginx:
+
+| Caller | URL | Path |
+|--------|-----|------|
+| Docker healthcheck | `http://127.0.0.1:8000/health` | Runs **inside** the vLLM container (localhost) |
+| Prometheus | `http://vllm:8000/metrics` | Internal `llmops` Docker network |
+| Host / clients | `http://localhost:8000/...` | Goes through Nginx → **Bearer required** |
+
+```text
+Host → Nginx (:8000) → vLLM     ← public API; Bearer token required
+Docker healthcheck → 127.0.0.1:8000/health  ← no Nginx, no auth
+Prometheus → vllm:8000/metrics               ← no Nginx, no auth
+```
+
+`localhost` on the host is not the same as `vllm` on the Docker network. Full explanation: [Localhost vs the internal Docker network](deployment.md#localhost-vs-the-internal-docker-network).
+
+### Why metrics do NOT go through Nginx
 
 Prometheus scrapes vLLM **directly** at `http://vllm:8000/metrics` on the internal Docker network. This is intentional:
 

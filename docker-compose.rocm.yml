@@ -27,3 +27,4 @@ services:
       - "8000"
       - --max-model-len
       - ${VLLM_MAX_MODEL_LEN:-4096}
+      - --enable-prefix-caching
